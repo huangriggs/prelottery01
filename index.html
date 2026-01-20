@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>頂級權重抽獎系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #020617;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #334155; }
+
+        .wheel-container {
+            transition: transform 5s cubic-bezier(0.15, 0, 0.05, 1);
+        }
+
+        .clip-sharp-pointer {
+            clip-path: polygon(50% 100%, 0 0, 100% 0);
+        }
+    </style>
+</head>
+<body class="text-slate-100 min-h-screen pb-24 overflow-x-hidden">
+
+    <div class="max-w-7xl mx-auto px-4 py-8 md:py-12">
+        <!-- 標題區 -->
+        <header class="mb-10 text-center">
+            <h1 class="text-4xl md:text-5xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-cyan-400 via-blue-500 to-purple-600 mb-3">
+                頂級權重抽獎系統
+            </h1>
+            <p class="text-slate-500 text-base md:text-lg">精確指針、點數扣除、響應式佈局與 CSV 支援</p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8 items-start mb-12">
+            
+            <!-- 左側：參加者名冊 -->
+            <div class="lg:col-span-1 bg-slate-900/80 backdrop-blur-xl rounded-[2rem] p-6 border border-slate-800 shadow-2xl order-2 lg:order-1">
+                <div class="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="users" class="text-cyan-400 w-5 h-5"></i>
+                        <h2 class="text-lg font-bold">參加者名冊</h2>
+                    </div>
+                    <div class="flex gap-1">
+                        <button onclick="clearParticipants()" class="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors" title="清空"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        <label class="p-2 hover:bg-cyan-500/20 text-cyan-400 rounded-lg transition-colors cursor-pointer" title="上傳">
+                            <i data-lucide="upload" class="w-4 h-4"></i>
+                            <input type="file" accept=".csv" class="hidden" onchange="handleFileUpload(event, 'participants')">
+                        </label>
+                        <button onclick="downloadCSV('participants')" class="p-2 hover:bg-slate-700 text-slate-400 rounded-lg transition-colors" title="範例"><i data-lucide="download" class="w-4 h-4"></i></button>
+                    </div>
+                </div>
+                <div id="participant-list" class="space-y-2 max-h-[400px] lg:max-h-[500px] overflow-y-auto pr-2 custom-scrollbar">
+                    <!-- 動態載入 -->
+                </div>
+            </div>
+
+            <!-- 中間：輪盤本體 -->
+            <div class="lg:col-span-2 flex flex-col items-center gap-8 md:gap-12 py-4 order-1 lg:order-2">
+                <div class="relative w-72 h-72 sm:w-80 sm:h-80 md:w-[460px] md:h-[460px]">
+                    <!-- 尖頭指針 -->
+                    <div class="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-6 z-[60]">
+                        <svg width="40" height="60" viewBox="0 0 40 60">
+                            <path d="M20 60 L40 0 L0 0 Z" fill="#ef4444" />
+                            <path d="M20 60 L20 0 L0 0 Z" fill="#dc2626" />
+                            <circle cx="20" cy="5" r="3" fill="white" fill-opacity="0.5" />
+                        </svg>
+                    </div>
+
+                    <!-- 旋轉盤面 -->
+                    <div id="wheel-wrapper" class="wheel-container w-full h-full rounded-full border-[8px] md:border-[12px] border-slate-800 shadow-[0_0_80px_rgba(0,0,0,0.6)] overflow-hidden">
+                        <canvas id="wheel-canvas" width="500" height="500" class="w-full h-full"></canvas>
+                    </div>
+
+                    <canvas id="particle-canvas" width="800" height="800" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none z-[100]"></canvas>
+                </div>
+
+                <button id="spin-button" onclick="startSpin()" disabled class="px-12 md:px-16 py-4 md:py-5 rounded-2xl text-xl md:text-2xl font-black tracking-widest transition-all duration-500 bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700">
+                    <div class="flex items-center gap-4">
+                        <i data-lucide="play" class="w-6 h-6"></i>
+                        <span id="spin-text">請先選擇獎品</span>
+                    </div>
+                </button>
+            </div>
+
+            <!-- 右側：獎品庫存 -->
+            <div class="lg:col-span-1 bg-slate-900/80 backdrop-blur-xl rounded-[2rem] p-6 border border-slate-800 shadow-2xl order-3">
+                <div class="flex items-center justify-between mb-6 border-b border-slate-800 pb-4">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="gift" class="text-amber-400 w-5 h-5"></i>
+                        <h2 class="text-lg font-bold">獎品庫存</h2>
+                    </div>
+                    <div class="flex gap-1">
+                        <button onclick="clearPrizes()" class="p-2 hover:bg-red-500/20 text-red-400 rounded-lg transition-colors" title="清空"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                        <label class="p-2 hover:bg-amber-500/20 text-amber-400 rounded-lg transition-colors cursor-pointer" title="上傳">
+                            <i data-lucide="upload" class="w-4 h-4"></i>
+                            <input type="file" accept=".csv" class="hidden" onchange="handleFileUpload(event, 'prizes')">
+                        </label>
+                        <button onclick="downloadCSV('prizes')" class="p-2 hover:bg-slate-700 text-slate-400 rounded-lg transition-colors" title="範例"><i data-lucide="download" class="w-4 h-4"></i></button>
+                    </div>
+                </div>
+                <div id="prize-list" class="space-y-3">
+                    <!-- 動態載入 -->
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部：榮譽榜 -->
+        <div id="honor-roll-container" class="w-full opacity-40 transition-all duration-1000">
+            <div class="bg-slate-900/60 rounded-[2.5rem] p-8 md:p-10 border border-slate-800 shadow-2xl overflow-hidden relative">
+                <h2 class="text-2xl md:text-3xl font-black mb-8 flex items-center gap-3">
+                    <i data-lucide="trophy" class="text-amber-500 w-8 h-8"></i> 抽獎總結得獎榮譽榜
+                </h2>
+                <div id="honor-roll-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+                    <!-- 動態載入 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 中獎彈窗 -->
+    <div id="winner-modal" class="fixed inset-0 z-[200] hidden flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-2xl">
+        <div class="bg-slate-900 border border-cyan-500/30 rounded-[3rem] p-10 md:p-12 max-w-md w-full text-center shadow-2xl">
+            <div class="bg-amber-500 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg rotate-12">
+                <i data-lucide="trophy" class="text-slate-950 w-10 h-10"></i>
+            </div>
+            <div class="text-slate-400 mb-2 font-bold tracking-[0.3em] text-sm">CONGRATULATIONS</div>
+            <div id="modal-winner-name" class="text-4xl md:text-5xl font-black text-white mb-6 drop-shadow-md"></div>
+            <p id="modal-prize-text" class="text-slate-500 mb-10 text-lg"></p>
+            <button onclick="closeModal()" class="w-full bg-cyan-500 text-slate-950 py-4 md:py-5 rounded-2xl font-black text-xl hover:bg-cyan-400 transition-all shadow-lg">
+                收下獎項
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // --- 初始化資料 ---
+        let participants = [
+            { id: 1, name: "張小明", points: 5500, active: true },
+            { id: 2, name: "李阿華", points: 1800, active: true },
+            { id: 3, name: "王大同", points: 3200, active: true },
+            { id: 4, name: "趙美麗", points: 1300, active: true },
+            { id: 5, name: "孫悟空", points: 8000, active: true },
+            { id: 6, name: "林酷客", points: 2200, active: true },
+            { id: 7, name: "周星馳", points: 4500, active: true },
+        ];
+
+        let prizes = [
+            { id: 1, name: "iPhone 15 Pro", qty: 2, cost: 2000, winners: [] },
+            { id: 2, name: "Switch 遊戲機", qty: 3, cost: 1000, winners: [] },
+            { id: 3, name: "超商禮券 $500", qty: 5, cost: 500, winners: [] },
+            { id: 4, name: "高級滑鼠墊", qty: 10, cost: 100, winners: [] },
+        ];
+
+        let selectedPrizeId = null;
+        let isSpinning = false;
+        let currentRotation = 0;
+        let audioCtx = null;
+
+        // --- 初始化渲染 ---
+        window.onload = () => {
+            lucide.createIcons();
+            renderParticipants();
+            renderPrizes();
+            renderHonorRoll();
+            drawWheel();
+        };
+
+        // --- 核心功能 ---
+        function renderParticipants() {
+            const container = document.getElementById('participant-list');
+            container.innerHTML = participants.length === 0 ? '<div class="text-center py-10 text-slate-600 text-sm">目前無資料</div>' : '';
+            participants.forEach(p => {
+                const div = document.createElement('div');
+                div.className = `flex justify-between items-center p-3 rounded-xl bg-slate-800/40 border border-slate-700/30 transition-all ${p.points < (getSelectedPrize()?.cost || 0) ? 'opacity-50 grayscale' : ''}`;
+                div.innerHTML = `
+                    <div class="flex items-center gap-3">
+                        <div class="w-8 h-8 rounded-lg bg-cyan-600 flex items-center justify-center font-bold text-xs">${p.name[0]}</div>
+                        <div class="text-sm font-semibold">${p.name}</div>
+                    </div>
+                    <div class="text-xs font-mono text-cyan-500/70">${p.points.toLocaleString()} P</div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function renderPrizes() {
+            const container = document.getElementById('prize-list');
+            container.innerHTML = prizes.length === 0 ? '<div class="text-center py-10 text-slate-600 text-sm">目前無資料</div>' : '';
+            prizes.forEach(p => {
+                const btn = document.createElement('button');
+                btn.disabled = isSpinning || p.qty <= 0;
+                btn.onclick = () => selectPrize(p.id);
+                const isSelected = selectedPrizeId === p.id;
+                btn.className = `w-full text-left p-4 rounded-2xl border-2 transition-all duration-300 ${isSelected ? 'border-cyan-500 bg-cyan-500/10 scale-[1.03] shadow-lg shadow-cyan-500/10' : 'border-transparent bg-slate-800/60 hover:bg-slate-800'} ${p.qty <= 0 ? 'opacity-30 grayscale pointer-events-none' : ''}`;
+                btn.innerHTML = `
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="font-bold">${p.name}</span>
+                        <span class="text-[10px] px-2 py-0.5 bg-slate-950 rounded text-amber-500">${p.cost} P</span>
+                    </div>
+                    <div class="text-xs text-slate-500 flex justify-between">
+                        <span>剩餘：${p.qty}</span>
+                        ${p.winners.length > 0 ? `<span class="text-cyan-400 font-bold">● 已抽中 ${p.winners.length} 位</span>` : ''}
+                    </div>
+                `;
+                container.appendChild(btn);
+            });
+            updateSpinButton();
+        }
+
+        function renderHonorRoll() {
+            const container = document.getElementById('honor-roll-grid');
+            const mainContainer = document.getElementById('honor-roll-container');
+            const allPrizesGone = prizes.length > 0 && prizes.every(p => p.qty === 0);
+            
+            mainContainer.className = `w-full transition-all duration-1000 ${allPrizesGone ? 'opacity-100 scale-100' : 'opacity-40 scale-95'}`;
+            container.innerHTML = '';
+            
+            prizes.forEach(p => {
+                const div = document.createElement('div');
+                div.className = "bg-slate-800/40 p-5 rounded-3xl border border-slate-700/30";
+                div.innerHTML = `
+                    <div class="text-slate-400 text-xs mb-3 font-bold uppercase tracking-widest">${p.name}</div>
+                    <div class="space-y-2">
+                        ${p.winners.length === 0 ? '<div class="text-slate-600 italic text-xs">尚無人獲得</div>' : p.winners.map(w => `<div class="flex items-center gap-2 text-white font-semibold text-sm"><div class="w-1.5 h-1.5 rounded-full bg-cyan-500"></div>${w}</div>`).join('')}
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function getSelectedPrize() {
+            return prizes.find(p => p.id === selectedPrizeId);
+        }
+
+        function selectPrize(id) {
+            if (isSpinning) return;
+            selectedPrizeId = id;
+            renderPrizes();
+            renderParticipants();
+            drawWheel();
+        }
+
+        function updateSpinButton() {
+            const btn = document.getElementById('spin-button');
+            const text = document.getElementById('spin-text');
+            const allPrizesGone = prizes.length > 0 && prizes.every(p => p.qty === 0);
+
+            if (allPrizesGone) {
+                btn.disabled = true;
+                btn.className = "px-16 py-5 rounded-2xl text-2xl font-black transition-all bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700";
+                text.innerText = "獎品已罄";
+            } else if (!selectedPrizeId) {
+                btn.disabled = true;
+                btn.className = "px-16 py-5 rounded-2xl text-2xl font-black transition-all bg-slate-800 text-slate-600 cursor-not-allowed border border-slate-700";
+                text.innerText = "請先選擇獎品";
+            } else {
+                btn.disabled = false;
+                btn.className = "px-16 py-5 rounded-2xl text-2xl font-black transition-all bg-white text-slate-950 hover:shadow-[0_0_50px_rgba(255,255,255,0.25)] hover:-translate-y-1 active:scale-95 cursor-pointer";
+                text.innerText = "開始抽獎";
+            }
+        }
+
+        function drawWheel() {
+            const canvas = document.getElementById('wheel-canvas');
+            const ctx = canvas.getContext('2d');
+            const prize = getSelectedPrize();
+            const activeParticipants = participants.filter(p => p.active);
+            if (activeParticipants.length === 0) return;
+
+            const totalPoints = activeParticipants.reduce((sum, p) => sum + p.points, 0);
+            let currentAngle = 0;
+            const centerX = canvas.width / 2;
+            const centerY = canvas.height / 2;
+            const radius = centerX - 10;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            activeParticipants.forEach((p, index) => {
+                const sliceAngle = (p.points / totalPoints) * 2 * Math.PI;
+                const isEligible = prize ? p.points >= prize.cost : true;
+
+                ctx.beginPath();
+                ctx.moveTo(centerX, centerY);
+                ctx.arc(centerX, centerY, radius, currentAngle, currentAngle + sliceAngle);
+                ctx.closePath();
+
+                ctx.fillStyle = isEligible ? `hsl(${(index * 360) / activeParticipants.length}, 70%, 55%)` : '#334155';
+                ctx.fill();
+                ctx.strokeStyle = '#0f172a';
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                // 文字繪製
+                ctx.save();
+                ctx.translate(centerX, centerY);
+                ctx.rotate(currentAngle + sliceAngle / 2);
+                ctx.textAlign = 'right';
+                ctx.fillStyle = isEligible ? '#ffffff' : '#64748b';
+                ctx.font = 'bold 12px sans-serif';
+                ctx.fillText(p.name, radius - 20, 4);
+                ctx.restore();
+
+                currentAngle += sliceAngle;
+            });
+
+            // 中心圓點
+            ctx.beginPath();
+            ctx.arc(centerX, centerY, 12, 0, 2 * Math.PI);
+            ctx.fillStyle = '#0f172a';
+            ctx.fill();
+            ctx.stroke();
+        }
+
+        function startSpin() {
+            const prize = getSelectedPrize();
+            if (isSpinning || !prize) return;
+
+            const eligibleParticipants = participants.filter(p => p.active && p.points >= prize.cost);
+            if (eligibleParticipants.length === 0) {
+                alert("目前沒有人的點數足夠參與這項抽獎！");
+                return;
+            }
+
+            isSpinning = true;
+            renderPrizes(); // 鎖定 UI
+
+            // 邏輯計算贏家
+            const totalEligiblePoints = eligibleParticipants.reduce((sum, p) => sum + p.points, 0);
+            const randomWeight = Math.random() * totalEligiblePoints;
+            let acc = 0;
+            let winner = null;
+            for (const p of eligibleParticipants) {
+                acc += p.points;
+                if (randomWeight <= acc) {
+                    winner = p;
+                    break;
+                }
+            }
+
+            // 角度計算 (270度是對準正上方)
+            const activeOnes = participants.filter(p => p.active);
+            const totalAllPoints = activeOnes.reduce((sum, p) => sum + p.points, 0);
+            let startDeg = 0;
+            let winnerWidth = 0;
+            for (const p of activeOnes) {
+                const width = (p.points / totalAllPoints) * 360;
+                if (p.id === winner.id) {
+                    winnerWidth = width;
+                    break;
+                }
+                startDeg += width;
+            }
+
+            const midDeg = startDeg + (winnerWidth / 2);
+            const spins = 10 + Math.floor(Math.random() * 5);
+            const targetRotation = (spins * 360) + (270 - midDeg);
+            const finalRotation = currentRotation + (targetRotation - (currentRotation % 360));
+            
+            currentRotation = finalRotation;
+            document.getElementById('wheel-wrapper').style.transform = `rotate(${currentRotation}deg)`;
+
+            setTimeout(() => {
+                showResult(winner, prize);
+            }, 5000);
+        }
+
+        function showResult(winner, prize) {
+            isSpinning = false;
+            
+            // 更新數據
+            participants = participants.map(p => p.id === winner.id ? { ...p, points: Math.max(0, p.points - prize.cost) } : p);
+            prizes = prizes.map(p => p.id === prize.id ? { ...p, qty: p.qty - 1, winners: [...p.winners, winner.name] } : p);
+            
+            selectedPrizeId = null;
+
+            // 顯示彈窗
+            document.getElementById('modal-winner-name').innerText = winner.name;
+            document.getElementById('modal-prize-text').innerHTML = `恭喜獲得 <span class="text-cyan-400 font-bold underline underline-offset-4">${prize.name}</span>！<br>點數已自動扣除。`;
+            document.getElementById('winner-modal').classList.remove('hidden');
+            
+            playSound();
+            launchParticles();
+            renderParticipants();
+            renderPrizes();
+            renderHonorRoll();
+            drawWheel();
+        }
+
+        function closeModal() {
+            document.getElementById('winner-modal').classList.add('hidden');
+        }
+
+        // --- 視覺與音效 ---
+        function playSound() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            const now = audioCtx.currentTime;
+            [523.25, 659.25, 783.99, 1046.50].forEach((freq, i) => {
+                const o = audioCtx.createOscillator();
+                const g = audioCtx.createGain();
+                o.type = 'triangle';
+                o.frequency.setValueAtTime(freq, now + i * 0.1);
+                o.connect(g);
+                g.connect(audioCtx.destination);
+                g.gain.setValueAtTime(0.1, now + i * 0.1);
+                g.gain.exponentialRampToValueAtTime(0.0001, now + i * 0.1 + 0.5);
+                o.start(now + i * 0.1);
+                o.stop(now + i * 0.1 + 0.5);
+            });
+        }
+
+        function launchParticles() {
+            const canvas = document.getElementById('particle-canvas');
+            const ctx = canvas.getContext('2d');
+            const particles = [];
+            for (let i = 0; i < 150; i++) {
+                particles.push({
+                    x: canvas.width / 2,
+                    y: canvas.height / 2,
+                    size: Math.random() * 6 + 2,
+                    speedX: (Math.random() - 0.5) * 15,
+                    speedY: (Math.random() - 0.7) * 15,
+                    color: `hsl(${Math.random() * 360}, 100%, 50%)`,
+                    gravity: 0.2,
+                    opacity: 1
+                });
+            }
+            function animate() {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                particles.forEach((p, i) => {
+                    p.speedY += p.gravity;
+                    p.x += p.speedX;
+                    p.y += p.speedY;
+                    p.opacity -= 0.01;
+                    if (p.opacity > 0) {
+                        ctx.globalAlpha = p.opacity;
+                        ctx.fillStyle = p.color;
+                        ctx.fillRect(p.x, p.y, p.size, p.size);
+                    } else {
+                        particles.splice(i, 1);
+                    }
+                });
+                if (particles.length > 0) requestAnimationFrame(animate);
+            }
+            animate();
+        }
+
+        // --- 資料管理 ---
+        function clearParticipants() {
+            if (confirm("確定要清空所有參加者嗎？")) {
+                participants = [];
+                renderParticipants();
+                drawWheel();
+            }
+        }
+
+        function clearPrizes() {
+            if (confirm("確定要清空所有獎品嗎？")) {
+                prizes = [];
+                selectedPrizeId = null;
+                renderPrizes();
+                renderHonorRoll();
+                drawWheel();
+            }
+        }
+
+        function downloadCSV(type) {
+            let content = type === 'participants' ? "參加者名稱,點數\n張小明,5000\n李阿華,2000" : "獎品名稱,數量,點數\niPhone 16,1,3000\n咖啡券,10,100";
+            const blob = new Blob(["\uFEFF" + content], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = `${type}_example.csv`;
+            link.click();
+        }
+
+        function handleFileUpload(e, type) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const text = event.target.result;
+                const rows = text.split(/\r?\n/).slice(1).filter(r => r.trim());
+                if (type === 'participants') {
+                    participants = rows.map((r, i) => {
+                        const [name, pts] = r.split(',');
+                        return { id: Date.now() + i, name: name.trim(), points: parseInt(pts) || 0, active: true };
+                    });
+                    renderParticipants();
+                } else {
+                    prizes = rows.map((r, i) => {
+                        const [name, qty, pts] = r.split(',');
+                        return { id: Date.now() + i, name: name.trim(), qty: parseInt(qty) || 1, cost: parseInt(pts) || 0, winners: [] };
+                    });
+                    selectedPrizeId = null;
+                    renderPrizes();
+                    renderHonorRoll();
+                }
+                drawWheel();
+            };
+            reader.readAsText(file);
+        }
+    </script>
+</body>
+</html>
